@@ -7,6 +7,8 @@ const String RYLR_ADD = "50"; //set to reciever RYLR address
 
 #define ARM_SWITCH 2
 #define LAUNCH_SWITCH 3
+#define A 4
+#define B 5
 
 SoftwareSerial RYLR(RYLR_RXD, RYLR_TXD);
 

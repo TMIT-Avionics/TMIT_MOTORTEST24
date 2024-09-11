@@ -3,7 +3,7 @@
 
 #define RYLR_RXD 7
 #define RYLR_TXD 6
-const String RYLR_ADD = "50"; //set to reciever RYLR address
+const String RYLR_ADD = "50"; //set to testbed RYLR address
 
 #define ARM_SWITCH 2
 #define LAUNCH_SWITCH 3
@@ -14,7 +14,7 @@ File logFile;
 
 typedef enum {SAFE, ARMED, LAUNCHED} STATUS;
 STATUS CURRENT_STATE = SAFE;
-String message, packet;
+String message, packet, receive;
 
 void stateInput()
 {
@@ -60,10 +60,36 @@ void stateInput()
   }
 }
 
+String parseRYLR(String input) 
+{
+  int start = input.indexOf(',') + 1;
+  start = input.indexOf(',', start) + 1;
+  int end = input.indexOf(',', start);
+  return input.substring(start, end);  
+}
+
+void receiveData()
+{
+  if(Serial.available())
+  {
+    receive = Serial.readString();
+    receive = parseRYLR(receive);
+
+    if(receive.charAt(0) >= '0' && receive.charAt(0) <= '9')
+      Serial.println("LOAD CELL READING: "+receive+" KG");
+    else
+      Serial.println("TESTBED CURRENT STATE: "+receive);
+  }
+}
+
 void setup() 
 {
+  pinMode(ARM_SWITCH, INPUT);     // connect external pulldown resistor
+  pinMode(LAUNCH_SWITCH, INPUT);  // connect external pulldown resistor
+
   Serial.begin(9600);
   RYLR.begin(57600);
+  
   if(CURRENT_STATE == SAFE)
   {
     message = "SAFE";
@@ -76,4 +102,5 @@ void setup()
 void loop() 
 {
   stateInput();
+  receiveData();
 }

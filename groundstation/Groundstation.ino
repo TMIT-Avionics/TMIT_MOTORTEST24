@@ -1,106 +1,121 @@
 #include <SoftwareSerial.h>
 #include <SD.h>
 
-#define RYLR_RXD 7
-#define RYLR_TXD 6
-const String RYLR_ADD = "50"; //set to testbed RYLR address
+// GPIO definitions
+#define RX_RYLR       7
+#define TX_RYLR       6
+#define ARM_SW        2
+#define LCH_SW        3
 
-#define ARM_SWITCH 2
-#define LAUNCH_SWITCH 3
+// State Machine Definition
+typedef enum {
+  SAFE,
+  ARMED,
+  LAUNCHED,
+  FAILURE
+} STATE;
+STATE currentState = SAFE;
 
-SoftwareSerial RYLR(RYLR_RXD, RYLR_TXD);
+// Object Instantiations
+SoftwareSerial RYLR(RX_RYLR, TX_RYLR);
 
+// Variable Definitions
 File logFile;
+String message, response;
 
-typedef enum {SAFE, ARMED, LAUNCHED} STATUS;
-STATUS CURRENT_STATE = SAFE;
-String message, packet, receive;
-
-void stateInput()
-{
-  switch(CURRENT_STATE)
-  {
-    case SAFE:
-      if (digitalRead(ARM_SWITCH) == HIGH && digitalRead(LAUNCH_SWITCH) == LOW)
-      {
-        CURRENT_STATE = ARMED;
-        delay(500); //debouncing delay
-        message = "ARMON";
-        packet = String("AT+SEND=")+RYLR_ADD+","+String(message.length())+","+message;
-        Serial.println("CURRENT STATE = ARMED");
-        RYLR.println(packet);
-        delay(100); // for transmission of data
-      }
-      break;
-    case ARMED:
-      if (digitalRead(ARM_SWITCH) == LOW)
-      {
-        CURRENT_STATE = SAFE;
-        delay(500); //debouncing delay
-        message = "SAFE";
-        packet = String("AT+SEND=")+RYLR_ADD+","+String(message.length())+","+message;
-        Serial.println("CURRENT STATE = SAFE");
-        RYLR.println(packet);
-        delay(100); // for transmission of data
-      }
-      else if (digitalRead(LAUNCH_SWITCH) == HIGH)
-      {
-        CURRENT_STATE = LAUNCHED;
-        delay(500); //debouncing delay
-        message = "LAUNCH";
-        packet = String("AT+SEND=")+RYLR_ADD+","+String(message.length())+","+message;
-        Serial.println("CURRENT STATE = LAUNCHED");
-        RYLR.println(packet);
-        delay(100); // for transmission of data
-      }
-      break;
-
-    case LAUNCHED:
-      break;
-  }
-}
-
-String parseRYLR(String input) 
-{
+String parseRYLR(String input) {
   int start = input.indexOf(',') + 1;
   start = input.indexOf(',', start) + 1;
   int end = input.indexOf(',', start);
-  return input.substring(start, end);  
+  String parsed = input.substring(start, end);
+  parsed.trim();
+  return parsed;  
 }
 
-void receiveData()
-{
-  if(Serial.available())
-  {
-    receive = Serial.readString();
-    receive = parseRYLR(receive);
+void sendState(String data) {
+  Serial.println("TRANSMIT: " + data);
+  message = "AT+SEND=0,"+ String(data.length()) + "," + data + "\r\n";
+  RYLR.print(message);
+  delay(10);
+}
 
-    if(receive.charAt(0) >= '0' && receive.charAt(0) <= '9')
-      Serial.println("LOAD CELL READING: "+receive+" KG");
-    else
-      Serial.println("TESTBED CURRENT STATE: "+receive);
+void checkTestbed() {
+  if (RYLR.available()) {
+    response = RYLR.readStringUntil('\n');
+    response = parseRYLR(response);
+    if (response.length() > 2) {
+      Serial.println(response);
+    }
   }
 }
 
-void setup() 
-{
-  pinMode(ARM_SWITCH, INPUT);     // connect external pulldown resistor
-  pinMode(LAUNCH_SWITCH, INPUT);  // connect external pulldown resistor
+void logData() {
+  //SD card store
+  logFile = SD.open("loadcell.txt", FILE_WRITE);
+  logFile.println(response);
+  logFile.close();
+}
 
+void checkInput() {
+  switch (currentState) {
+    case SAFE:
+      if (digitalRead(ARM_SW) == HIGH) {
+        currentState = ARMED;
+        sendState("ARM");
+        delay(1000);
+      }
+      break;
+    case ARMED:
+      if (digitalRead(ARM_SW) == LOW) {
+        currentState = SAFE;
+        sendState("DISARM");
+        delay(1000);
+      }
+      else if(digitalRead(LCH_SW) == HIGH) {
+        currentState = LAUNCHED;
+        delay(1000);
+        sendState("LAUNCH");
+      }
+      break;
+    case LAUNCHED:
+      while(1) {
+        checkTestbed();
+        logData();
+      }
+      break;
+    default:
+      break;
+  }
+
+}
+
+void setup() {
   Serial.begin(9600);
+
+  pinMode(ARM_SW, INPUT);
+  pinMode(LCH_SW, INPUT);
+
+  //RYLR setup
   RYLR.begin(57600);
-  
-  if(CURRENT_STATE == SAFE)
-  {
-    message = "SAFE";
-    packet = String("AT+SEND=")+RYLR_ADD+","+String(message.length())+","+message;
-    Serial.println("CURRENT STATE = SAFE");
-    RYLR.println(packet);
+
+  //SD Card setup
+  Serial.println("\nSerial Comm. Initialised.");
+  if (!SD.begin()) {
+    Serial.println("SD card initialisation failed.");
+    return;
   }
+  logFile = SD.open("loadcell.txt", FILE_WRITE);
+  if (!logFile) {
+    Serial.println("Couldn't open log file");
+  } 
+  else {
+    Serial.println("Logging to SD card...");
+  }
+
+  Serial.println("GROUNDSTATION SET UP COMPLETE.");
 }
 
-void loop() 
-{
-  stateInput();
-  receiveData();
+void loop() {
+  checkInput();
+  checkTestbed();
 }

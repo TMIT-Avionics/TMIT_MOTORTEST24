@@ -3,16 +3,20 @@
 #include <SD.h>
 
 // GPIO definitions
-#define RX_RYLR       2
-#define TX_RYLR       3
+#define RX_RYLR       7
+#define TX_RYLR       6
 #define RX_RS232      8
-#define TX_RS232      9 
-#define D4184A        4 // E-MATCH
-#define D4184B        5 // IGNITER WIRE
-const String RYLR_ADD = "56"; //set to groundstation RYLR address
+#define TX_RS232      9
+#define D4184A        4
+#define D4184B        5
 
 // State Machine Definition
-typedef enum {SAFE,ARMED,LAUNCHED} STATE;
+typedef enum {
+  SAFE,
+  ARMED,
+  LAUNCHED,
+  FAILURE
+} STATE;
 STATE currentState = SAFE;
 
 // Object Instantiations
@@ -21,143 +25,139 @@ AltSoftSerial RS232;
 
 // Variable Definitions
 File logFile;
-String response, weight, message, packet;
-float read, tareValue = 0;
+float loadCellReading;
+float tareValue = 0;
+String currState, response, weightString;
 
-// Function Definitions
-String parseRYLR(String input) 
-{
+// // Prototype Function Definitions
+
+void getTareValue() {
+  if (RS232.available()) {
+    tareValue = RS232.parseFloat();
+  }
+}
+
+void getData() {
+  loadCellReading = RS232.parseFloat();
+  float weight = loadCellReading - tareValue;
+  weightString = String(weight);
+  Serial.println(weightString);
+}
+
+void logData() {
+  logFile = SD.open("loadcell.txt", FILE_WRITE);
+  logFile.println(weightString);
+  logFile.close();
+}
+
+void sendData() {
+  String transmit = "AT+SEND=0," + String(weightString.length()) + "," + weightString + "\r\n";
+  RYLR.print(transmit);
+  delay(10);
+}
+
+String parseRYLR(String input) {
   int start = input.indexOf(',') + 1;
   start = input.indexOf(',', start) + 1;
   int end = input.indexOf(',', start);
-  return input.substring(start, end);  
+  String parsed = input.substring(start, end);
+  parsed.trim();
+  return parsed;  
 }
 
-void getTareValue() 
-{
-  if(RS232.available())
-  {
-    tareValue = RS232.parseFloat();
-    Serial.println("TARE VALUE UPDATED");
-  }
+STATE getCurrentState() {
+  return currentState;
 }
 
-void logData()
-{
-  // write SD Card code
+void sendState(String currState) {
+  currState = "TESTBED STATE: " + currState;
+  currState = "AT+SEND=0,"+ String(currState.length()) + "," + currState + "\r\n";
+  RYLR.print(currState);
+  delay(10);
 }
 
-void transmitData()
-{
-  if(RS232.available())
-  {
-    read = RS232.parseFloat();
-    weight = String(read - tareValue);
-    packet = String("AT+SEND=")+RYLR_ADD+","+String(weight.length())+","+weight;
-    RYLR.println(packet);
-  }
-}
-
-void checkInput(String receive)
-{
-  if (receive == "SAFE" && currentState == SAFE)
-  {
-    Serial.println("COMMUNICATION ESTABLISHED.");
-    message = "SAFE";
-    packet = String("AT+SEND=0,")+String(message.length())+","+message;
-    RYLR.println(packet);
-  }
-  else if (receive == "ARMON" && currentState == SAFE)
-  {
-    Serial.println("CURRENT STATE: ARMED");
+void checkInput(String receive) {
+  if (receive == "ARM" && currentState == SAFE) {
+    Serial.println("CURRENT STATE: ARMED.");
     currentState = ARMED;
-    message = "ARMED";
-    packet = String("AT+SEND=0,")+String(message.length())+","+message;
-    RYLR.println(packet);
-    getTareValue(); // TARE once ARMED state is reached
+    sendState("ARM");
     return;
   }
-  else if (receive == "SAFE" && currentState == ARMED)
-  {
-    Serial.println("CURRENT STATE: SAFE");
+  else if (receive == "DISARM" && currentState == ARMED) {
+    Serial.println("CURRENT STATE: SAFE. ");
     currentState = SAFE;
-    message = "SAFE";
-    packet = String("AT+SEND=0,")+String(message.length())+","+message;
-    RYLR.println(packet);
+    sendState("SAFE");
     return;
   }
-  else if (receive == "LAUNCH" && currentState == ARMED)
-  {
-    Serial.println("CURRENT STATE: LAUNCHED");
+  else if (receive == "LAUNCH" && currentState == ARMED) {
+    Serial.println("CURRENT STATE: LAUNCHED. ");
     currentState = LAUNCHED;
-    message = "LAUNCHED";
-    packet = String("AT+SEND=0,")+String(message.length())+","+message;
-    RYLR.println(packet);
+    sendState("LAUNCH");
     return;
   }
-  else
-  {
-    Serial.println("INVALID INPUT PROVIDED");
-    message = "ERROR";
-    packet = String("AT+SEND=0,")+String(message.length())+","+message;
-    RYLR.println(packet);
+  else {
+    //Serial.println("INVALID INPUT PROVIDED. ");
     return;
   }
 }
 
-void performOperation(STATE currentState) 
-{
-  switch(currentState)
-  {
+void performOperations() {
+  switch(currentState) {
     case SAFE:
       break;
     case ARMED:
-      transmitData();
-      logData();
       break;
     case LAUNCHED:
-      digitalWrite(D4184A, HIGH);
-      digitalWrite(D4184B, HIGH);
-      Serial.println("D4184s LATCHED");
-      delay(2000);
-      digitalWrite(D4184A, LOW);
-      Serial.println("E-MATCH D4184 UNLATCHED");
-      delay(1500);
-      digitalWrite(D4184B, LOW);
-      Serial.println("IGNITER WIRE D4184 UNLATCHED");
-      
-      while(true)
-      {
-        transmitData();
+      while(1) {
+        getData();
         logData();
+        sendData();
       }
+      break;
+    case FAILURE:
+      break;
+    default:
       break;
   }
 }
 
-void setup() 
-{
-  pinMode(D4184A, OUTPUT);
-  pinMode(D4184B, OUTPUT);
-  digitalWrite(D4184A, LOW);
-  digitalWrite(D4184B, LOW);
-
+void setup() {
   Serial.begin(9600);
+
+  //RYLR setup
   RYLR.begin(57600);
+  Serial.println("\nTESTBED SETUP COMPLETE.");
+
+  //Load Cell setup
   RS232.begin(9600);
+  Serial.println("\nLoad Cell Comm. Initialised.");
+
+  //SD Card setup
+  Serial.println("Serial Comm. Initialised.");
+  if (!SD.begin()) {
+    Serial.println("SD card initialisation failed.");
+    return;
+  }
+  logFile = SD.open("loadcell.txt", FILE_WRITE);
+  if (!logFile) {
+    Serial.println("Couldn't open log file");
+  } 
+  else {
+    Serial.println("Logging to SD card...\n");
+  }
+
+  //Tare the Loadcell
   getTareValue();
+
 }
 
-void loop() 
-{
-  if (RYLR.available()) 
-  {
+void loop() {
+  if (RYLR.available()) {
     response = RYLR.readStringUntil('\n');
-    RYLR.flush();
-    Serial.println("MESSAGE FROM GROUND: " + response);
     response = parseRYLR(response);
-    
+    response.trim();
+    Serial.println("RESPONSE: " + response);
     checkInput(response);
-    performOperation(currentState);
+    performOperations();
   }
 }

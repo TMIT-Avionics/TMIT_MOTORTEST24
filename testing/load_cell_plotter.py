@@ -11,14 +11,16 @@ import time
 import serial
 import plotly.graph_objects as go
 
-mode =  1 #select mode 1 for live data mode 0 for csv data
+mode =  0 #select mode 1 for live data mode 0 for csv data
 current_index = 0
 df = pd.DataFrame(columns = ['time','load'])
 csv_file2 = r'empty_csv_file'
+current_state = "UNKNOWN"
+
 
 #read from arduino (close serial monitor)
 def get_arduino_data():
-    global csv_file2
+    global csv_file2, current_state
     port = 'COM9'
     baud = 9600
     ser = serial.Serial(port, baud, timeout=1)
@@ -32,6 +34,10 @@ def get_arduino_data():
         while True:
             if ser.in_waiting > 0:
                 line = ser.readline().decode('ascii',errors='ignore').rstrip()
+                if "TESTBED CURRENT STATE:" in line:
+                    current_state = line.split(":")[1].strip()
+                    print(f"status: {current_state}")
+                
                 try:
                     load = float(line)
                     current_time = time.strftime('%H:%M:%S')
@@ -79,6 +85,7 @@ def plot_data():
 
 #graph settings   
 def graph():
+    global current_state 
     pdata = plot_data()
 
     load_fig = px.line(pdata, x='time',y='load', title='load vs time', markers=True
@@ -89,8 +96,11 @@ def graph():
     latest_val =[
         html.Div(f"load: {pdata['load'].iloc[-1]:.2f}")
     ]
+    curr_status = [
+        html.Div(f"Status: {current_state}")
+    ]
 
-    return load_fig, latest_val
+    return load_fig, latest_val, curr_status
 
 #webapp settings
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
@@ -99,8 +109,10 @@ app.layout= html.Div([
     html.H1("Sensor data", style={'textAlign':'center'}),
 
     html.H3('latest values',style={'textAlign':'center'}),
+    html.H3('Status', style={'textAlign':'center'}),
 
     html.Div(id='latest-values', style={'textAlign':'center','margin':'20px'}),
+    html.Div(id='current-status', style={'textAlign':'center','margin':'20px'}),
 
     dcc.Graph(id='load-graph',animate=False,style={'height':'400px','width':'100%',}),
 
@@ -113,7 +125,8 @@ app.layout= html.Div([
 
 @app.callback(
     [Output('load-graph','figure'),
-     Output('latest-values','children')],
+     Output('latest-values','children'),
+     Output('current-status','children')],
      [Input('interval-component','n_intervals')]
 )
 

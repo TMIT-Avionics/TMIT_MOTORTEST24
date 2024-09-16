@@ -108,6 +108,12 @@ void performOperations() {
     case ARMED:
       break;
     case LAUNCHED:
+      digitalWrite(D4184A, HIGH);
+      digitalWrite(D4184B, HIGH);
+      delay(1000);
+      digitalWrite(D4184A, LOW);
+      digitalWrite(D4184B, LOW);
+
       while(1) {
         getData();
         logData();
@@ -124,9 +130,13 @@ void performOperations() {
 void setup() {
   Serial.begin(9600);
 
+  pinMode(D4184A, OUTPUT);
+  pinMode(D4184B, OUTPUT);
+  digitalWrite(D4184A, LOW);
+  digitalWrite(D4184B, LOW);
+
   //RYLR setup
   RYLR.begin(57600);
-  Serial.println("\nTESTBED SETUP COMPLETE.");
 
   //Load Cell setup
   RS232.begin(9600);
@@ -149,13 +159,14 @@ void setup() {
   //Tare the Loadcell
   getTareValue();
 
+  Serial.println("TESTBED SETUP COMPLETE.");
+
 }
 
 void loop() {
   if (RYLR.available()) {
     response = RYLR.readStringUntil('\n');
     response = parseRYLR(response);
-    response.trim();
     Serial.println("RESPONSE: " + response);
     checkInput(response);
     performOperations();

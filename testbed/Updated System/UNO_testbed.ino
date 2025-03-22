@@ -257,6 +257,9 @@ void setup()
   pinMode(N_ENABLE, OUTPUT);
   pinMode(ACK, INPUT);
 
+  pinMode(D4184A, OUTPUT);
+  pinMode(D4184B, OUTPUT);
+
   digitalWrite(N_ENABLE, HIGH);
 
   // dataInit();
